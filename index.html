@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Family Restaurant Invaders</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: #1a0a00;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  #game-container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 100vw;
+    max-height: 100vh;
+  }
+  canvas {
+    border: 2px solid #cc6600;
+    box-shadow: 0 0 20px rgba(204, 102, 0, 0.3);
+    max-width: 100vw;
+    display: block;
+  }
+  #touch-controls {
+    display: none;
+    width: 100%;
+    max-width: 600px;
+    padding: 8px 15px;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    position: fixed;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+  }
+  .ctrl-group {
+    display: flex;
+    gap: 12px;
+  }
+  .ctrl-btn {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    border: 3px solid rgba(255,170,68,0.7);
+    background: rgba(40,20,0,0.8);
+    color: #ffaa44;
+    font-size: 30px;
+    font-weight: bold;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.1s;
+  }
+  .ctrl-btn:active, .ctrl-btn.active {
+    background: rgba(255,140,40,0.5);
+    border-color: #ffcc66;
+  }
+  .ctrl-btn.fire {
+    width: 90px; height: 90px;
+    border-color: rgba(220,50,0,0.8);
+    background: rgba(100,20,0,0.8);
+    color: #ff6644;
+    font-size: 16px;
+  }
+  .ctrl-btn.fire:active, .ctrl-btn.fire.active {
+    background: rgba(220,60,0,0.6);
+    border-color: #ff8866;
+  }
+</style>
+</head>
+<body>
+<div id="game-container">
+<canvas id="game"></canvas>
+<div id="touch-controls">
+  <div class="ctrl-group">
+    <div class="ctrl-btn" id="btn-left">&#9664;</div>
+    <div class="ctrl-btn" id="btn-right">&#9654;</div>
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-btn fire" id="btn-fire">FIRE</div>
+  </div>
+</div>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = 1100, H = 850;
+canvas.width = W;
+canvas.height = H;
+
+// roundRect polyfill
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    if (typeof r === 'number') r = { tl: r, tr: r, br: r, bl: r };
+    this.beginPath();
+    this.moveTo(x + r.tl, y);
+    this.lineTo(x + w - r.tr, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+    this.lineTo(x + w, y + h - r.br);
+    this.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+    this.lineTo(x + r.bl, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+    this.lineTo(x, y + r.tl);
+    this.quadraticCurveTo(x, y, x + r.tl, y);
+    this.closePath();
+    return this;
+  };
+}
+
+// Load images
+const dishImages = {};
+const IMAGE_FILES = {
+  'parfait': '110.webp',
+  'hamburg_red': '140.webp',
+  'udon_nabe': '150.webp',
+  'cheese_hamburg': '160.webp',
+  'hamburg_demi': '234.webp',
+  'karaage': '440.webp'
+};
+let imagesLoaded = 0;
+const totalImages = Object.keys(IMAGE_FILES).length;
+
+for (const [key, file] of Object.entries(IMAGE_FILES)) {
+  const img = new Image();
+  img.onload = () => { imagesLoaded++; };
+  img.src = file;
+  dishImages[key] = img;
+}
+
+// ===== AUDIO ENGINE =====
+let audioCtx = null;
+let musicGain = null;
+let sfxGain = null;
+let musicPlaying = false;
+let musicNodes = [];
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  musicGain = audioCtx.createGain();
+  musicGain.gain.value = 0.25;
+  musicGain.connect(audioCtx.destination);
+  sfxGain = audioCtx.createGain();
+  sfxGain.gain.value = 0.4;
+  sfxGain.connect(audioCtx.destination);
+}
+
+// SFX: play a quick tone
+function playSfx(freq, duration, type, volume) {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type || 'square';
+  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  gain.gain.setValueAtTime((volume || 0.3) * sfxGain.gain.value, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function sfxShoot() {
+  if (!audioCtx) return;
+  playSfx(600, 0.08, 'square', 0.2);
+  playSfx(800, 0.06, 'square', 0.15);
+}
+
+function sfxHit() {
+  if (!audioCtx) return;
+  playSfx(200, 0.15, 'sawtooth', 0.3);
+  playSfx(300, 0.1, 'square', 0.2);
+  // noise burst
+  const bufferSize = audioCtx.sampleRate * 0.08;
+  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buffer;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+  noise.connect(g);
+  g.connect(audioCtx.destination);
+  noise.start();
+}
+
+function sfxPlayerHit() {
+  if (!audioCtx) return;
+  playSfx(150, 0.3, 'sawtooth', 0.4);
+  playSfx(80, 0.4, 'square', 0.3);
+  setTimeout(() => playSfx(60, 0.3, 'sawtooth', 0.2), 100);
+}
+
+function sfxBossHit() {
+  if (!audioCtx) return;
+  playSfx(100, 0.2, 'sawtooth', 0.4);
+  playSfx(150, 0.15, 'square', 0.3);
+}
+
+function sfxBossDead() {
+  if (!audioCtx) return;
+  const freqs = [200, 300, 400, 500, 600, 800];
+  freqs.forEach((f, i) => setTimeout(() => playSfx(f, 0.15, 'square', 0.25), i * 60));
+}
+
+function sfxLevelClear() {
+  if (!audioCtx) return;
+  const melody = [523, 587, 659, 784, 880, 1047];
+  melody.forEach((f, i) => setTimeout(() => playSfx(f, 0.2, 'triangle', 0.3), i * 100));
+}
+
+function sfxGameOver() {
+  if (!audioCtx) return;
+  const melody = [400, 350, 300, 200];
+  melody.forEach((f, i) => setTimeout(() => playSfx(f, 0.4, 'sawtooth', 0.25), i * 200));
+}
+
+// ===== BACKGROUND MUSIC =====
+// A looping chiptune-style BGM
+let bgmStep = 0;
+let bgmInterval = null;
+let bgmBassStep = 0;
+
+// Pentatonic scale notes for a fun restaurant battle theme
+const BGM_MELODY = [
+  523, 587, 659, 784, 880, 784, 659, 587,
+  523, 659, 784, 880, 1047, 880, 784, 659,
+  440, 523, 587, 659, 784, 659, 587, 523,
+  440, 587, 523, 440, 392, 440, 523, 587,
+];
+const BGM_BASS = [
+  131, 131, 165, 165, 196, 196, 220, 220,
+  175, 175, 220, 220, 262, 262, 220, 220,
+  147, 147, 175, 175, 196, 196, 175, 175,
+  131, 131, 165, 165, 196, 196, 165, 165,
+];
+
+function startMusic() {
+  if (!audioCtx || musicPlaying) return;
+  musicPlaying = true;
+  bgmStep = 0;
+  bgmBassStep = 0;
+
+  bgmInterval = setInterval(() => {
+    if (!audioCtx || gameState === 'title') return;
+
+    const now = audioCtx.currentTime;
+
+    // Melody
+    const melodyOsc = audioCtx.createOscillator();
+    const melodyGain = audioCtx.createGain();
+    melodyOsc.type = 'triangle';
+    melodyOsc.frequency.setValueAtTime(BGM_MELODY[bgmStep % BGM_MELODY.length], now);
+    melodyGain.gain.setValueAtTime(0.08, now);
+    melodyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    melodyOsc.connect(melodyGain);
+    melodyGain.connect(musicGain);
+    melodyOsc.start(now);
+    melodyOsc.stop(now + 0.13);
+
+    // Bass (every 2 steps)
+    if (bgmStep % 2 === 0) {
+      const bassOsc = audioCtx.createOscillator();
+      const bassGain = audioCtx.createGain();
+      bassOsc.type = 'square';
+      bassOsc.frequency.setValueAtTime(BGM_BASS[bgmBassStep % BGM_BASS.length], now);
+      bassGain.gain.setValueAtTime(0.1, now);
+      bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      bassOsc.connect(bassGain);
+      bassGain.connect(musicGain);
+      bassOsc.start(now);
+      bassOsc.stop(now + 0.22);
+      bgmBassStep++;
+    }
+
+    // Percussion (kick on beat 0,4 / snare on 2,6)
+    if (bgmStep % 8 === 0 || bgmStep % 8 === 4) {
+      // Kick
+      const kickOsc = audioCtx.createOscillator();
+      const kickGain = audioCtx.createGain();
+      kickOsc.type = 'sine';
+      kickOsc.frequency.setValueAtTime(150, now);
+      kickOsc.frequency.exponentialRampToValueAtTime(30, now + 0.1);
+      kickGain.gain.setValueAtTime(0.2, now);
+      kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      kickOsc.connect(kickGain);
+      kickGain.connect(musicGain);
+      kickOsc.start(now);
+      kickOsc.stop(now + 0.12);
+    }
+    if (bgmStep % 8 === 2 || bgmStep % 8 === 6) {
+      // Hi-hat / snare noise
+      const bufSize = audioCtx.sampleRate * 0.05;
+      const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.1, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      src.connect(g);
+      g.connect(musicGain);
+      src.start(now);
+    }
+
+    bgmStep++;
+  }, 125); // ~120 BPM (8th notes)
+}
+
+function stopMusic() {
+  if (bgmInterval) {
+    clearInterval(bgmInterval);
+    bgmInterval = null;
+  }
+  musicPlaying = false;
+}
+
+let score = 0;
+let lives = 3;
+let level = 1;
+let gameState = 'title';
+let shakeTimer = 0;
+let shakeIntensity = 0;
+let globalTime = 0;
+
+// Background pattern
+let bgPattern = [];
+for (let i = 0; i < 80; i++) {
+  bgPattern.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * Math.PI * 2 });
+}
+
+// Player
+const player = {
+  x: W / 2, y: H - 65,
+  w: 48, h: 34,
+  speed: 5, dx: 0,
+  invincible: 0
+};
+
+let bullets = [];
+let enemyBullets = [];
+let invaders = [];
+let invaderDir = 1;
+let invaderSpeed = 0.5;
+let dropAmount = 18;
+let shootTimer = 0;
+let shootInterval = 80;
+let boss = null;
+let bossTimer = 0;
+let bossHP = 0;
+let shields = [];
+let particles = [];
+let floatingTexts = [];
+
+// Dish types using images
+const DISHES = [
+  { name: 'Matcha Parfait',    imgKey: 'parfait',        points: 40 },
+  { name: 'Hamburg Steak',     imgKey: 'hamburg_red',    points: 30 },
+  { name: 'Udon Nabe',        imgKey: 'udon_nabe',      points: 20 },
+  { name: 'Cheese Hamburg',    imgKey: 'cheese_hamburg',  points: 20 },
+  { name: 'Hamburg Demi',      imgKey: 'hamburg_demi',    points: 10 },
+  { name: 'Karaage',          imgKey: 'karaage',         points: 10 },
+];
+
+// Which dishes to use per row (indices into DISHES)
+let rowDishes = [0, 2, 3, 4];
+
+const INV_W = 96;
+const INV_H = 72;
+
+function createInvaders() {
+  invaders = [];
+  for (let row = 0; row < 4; row++) {
+    const dish = DISHES[rowDishes[row % rowDishes.length]];
+    for (let col = 0; col < 7; col++) {
+      invaders.push({
+        x: 50 + col * 130,
+        y: 55 + row * 88,
+        w: INV_W,
+        h: INV_H,
+        dish: dish,
+        alive: true,
+        wobble: (row + col) * 0.7
+      });
+    }
+  }
+}
+
+function createShields() {
+  shields = [];
+  const positions = [140, 360, 580, 800];
+  for (let pos of positions) {
+    let blocks = [];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (r >= 3 && c >= 3 && c <= 4) continue;
+        blocks.push({ x: pos - 24 + c * 6, y: H - 135 + r * 6, w: 6, h: 6, alive: true });
+      }
+    }
+    shields.push(blocks);
+  }
+}
+
+function drawDish(inv) {
+  const bounce = Math.sin(inv.wobble) * 2;
+  const img = dishImages[inv.dish.imgKey];
+  const dx = inv.x;
+  const dy = inv.y + bounce;
+
+  if (img && img.complete && img.naturalWidth > 0) {
+    // Draw circular clipped image
+    ctx.save();
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(dx + inv.w / 2, dy + inv.h / 2 + 4, inv.w / 2 + 2, inv.h / 2 + 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Clip to rounded rect
+    ctx.beginPath();
+    ctx.roundRect(dx, dy, inv.w, inv.h, 8);
+    ctx.clip();
+
+    // Draw image scaled to fit
+    const aspect = img.naturalWidth / img.naturalHeight;
+    let sw = inv.w, sh = inv.h;
+    if (aspect > inv.w / inv.h) {
+      sh = inv.w / aspect;
+    } else {
+      sw = inv.h * aspect;
+    }
+    // Center crop
+    const srcW = img.naturalWidth;
+    const srcH = img.naturalHeight;
+    const targetAspect = inv.w / inv.h;
+    const srcAspect = srcW / srcH;
+    let sx = 0, sy = 0, sW = srcW, sH = srcH;
+    if (srcAspect > targetAspect) {
+      sW = srcH * targetAspect;
+      sx = (srcW - sW) / 2;
+    } else {
+      sH = srcW / targetAspect;
+      sy = (srcH - sH) / 2;
+    }
+    ctx.drawImage(img, sx, sy, sW, sH, dx, dy, inv.w, inv.h);
+
+    ctx.restore();
+
+    // Border
+    ctx.strokeStyle = '#ffaa44';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(dx, dy, inv.w, inv.h, 8);
+    ctx.stroke();
+
+    // Small angry face at bottom edge - keeps food photo visible
+    const cx = dx + inv.w / 2;
+    const cy = dy + inv.h - 10;
+
+    // Eyes
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(cx - 9, cy - 4, 6, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx + 9, cy - 4, 6, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pupils
+    ctx.fillStyle = '#cc0000';
+    ctx.beginPath();
+    ctx.arc(cx - 8, cy - 3, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 10, cy - 3, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pupil shine
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx - 9.5, cy - 5, 1.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 8.5, cy - 5, 1.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Angry eyebrows
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - 16, cy - 11);
+    ctx.lineTo(cx - 5, cy - 8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx + 16, cy - 11);
+    ctx.lineTo(cx + 5, cy - 8);
+    ctx.stroke();
+
+  } else {
+    // Fallback if image not loaded
+    ctx.fillStyle = '#555';
+    ctx.beginPath();
+    ctx.roundRect(dx, dy, inv.w, inv.h, 8);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(inv.dish.name, dx + inv.w / 2, dy + inv.h / 2 + 4);
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawSteam(x, y) {
+  const t = globalTime;
+  for (let i = 0; i < 3; i++) {
+    const sx = x + Math.sin(t * 2 + i * 2) * 6;
+    const sy = y - 5 - i * 7 - (t * 12 % 20);
+    const alpha = 0.2 - i * 0.05;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 3 + i, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPlayer() {
+  if (player.invincible > 0 && Math.floor(player.invincible * 10) % 2 === 0) return;
+
+  ctx.save();
+  ctx.translate(player.x, player.y);
+
+  // Waiter body (apron)
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(-10, 2, 20, 16);
+  // Shirt
+  ctx.fillStyle = '#2244aa';
+  ctx.fillRect(-12, -4, 24, 10);
+  // Head
+  ctx.fillStyle = '#ffcc88';
+  ctx.beginPath();
+  ctx.arc(0, -12, 8, 0, Math.PI * 2);
+  ctx.fill();
+  // Chef hat
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(-7, -22, 14, 8);
+  ctx.beginPath();
+  ctx.arc(-4, -22, 5, 0, Math.PI, true);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(4, -22, 5, 0, Math.PI, true);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, -23, 4, 0, Math.PI, true);
+  ctx.fill();
+  // Tray
+  ctx.fillStyle = '#888';
+  ctx.beginPath();
+  ctx.ellipse(0, -2, 22, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#aaa';
+  ctx.beginPath();
+  ctx.ellipse(0, -3, 20, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Ketchup bottle
+  ctx.fillStyle = '#cc2200';
+  ctx.fillRect(-8, -10, 5, 7);
+  ctx.fillRect(-7, -12, 3, 3);
+  // Mustard bottle
+  ctx.fillStyle = '#ddaa00';
+  ctx.fillRect(3, -10, 5, 7);
+  ctx.fillRect(4, -12, 3, 3);
+
+  ctx.restore();
+}
+
+function drawBullets() {
+  for (let b of bullets) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.fillStyle = '#cc2200';
+    ctx.beginPath();
+    ctx.moveTo(0, -6);
+    ctx.quadraticCurveTo(4, 0, 0, 6);
+    ctx.quadraticCurveTo(-4, 0, 0, -6);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,100,50,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(-1, -1, 1.5, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  for (let b of enemyBullets) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.fillStyle = b.color || '#aa6622';
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2 + b.y * 0.1;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * 5, Math.sin(a) * 5, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function drawShields() {
+  for (let shield of shields) {
+    for (let block of shield) {
+      if (!block.alive) continue;
+      ctx.fillStyle = '#cc6633';
+      ctx.fillRect(block.x, block.y, block.w, block.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillRect(block.x, block.y, block.w, 1);
+    }
+  }
+}
+
+function drawBoss(b) {
+  // Boss uses the karaage image, bigger
+  const img = dishImages['karaage'];
+  ctx.save();
+
+  if (img && img.complete) {
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(b.x + b.w / 2, b.y + b.h / 2 + 5, b.w / 2 + 4, b.h / 2 + 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.roundRect(b.x, b.y, b.w, b.h, 10);
+    ctx.clip();
+
+    const srcW = img.naturalWidth, srcH = img.naturalHeight;
+    const targetAspect = b.w / b.h;
+    const srcAspect = srcW / srcH;
+    let sx = 0, sy = 0, sW = srcW, sH = srcH;
+    if (srcAspect > targetAspect) {
+      sW = srcH * targetAspect;
+      sx = (srcW - sW) / 2;
+    } else {
+      sH = srcW / targetAspect;
+      sy = (srcH - sH) / 2;
+    }
+    ctx.drawImage(img, sx, sy, sW, sH, b.x, b.y, b.w, b.h);
+  }
+  ctx.restore();
+
+  // Golden border
+  ctx.strokeStyle = '#ffdd44';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(b.x, b.y, b.w, b.h, 10);
+  ctx.stroke();
+
+  // Crown
+  const cx = b.x + b.w / 2;
+  ctx.fillStyle = '#ffdd44';
+  ctx.beginPath();
+  ctx.moveTo(cx - 15, b.y - 2);
+  ctx.lineTo(cx - 10, b.y - 14);
+  ctx.lineTo(cx - 5, b.y - 5);
+  ctx.lineTo(cx, b.y - 16);
+  ctx.lineTo(cx + 5, b.y - 5);
+  ctx.lineTo(cx + 10, b.y - 14);
+  ctx.lineTo(cx + 15, b.y - 2);
+  ctx.closePath();
+  ctx.fill();
+
+  // HP bar
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(b.x, b.y - 22, b.w, 6);
+  ctx.fillStyle = bossHP > 2 ? '#44dd88' : bossHP > 1 ? '#ffaa44' : '#ff4444';
+  ctx.fillRect(b.x, b.y - 22, b.w * (bossHP / 5), 6);
+
+  // "BOSS" label
+  ctx.fillStyle = '#ff4444';
+  ctx.font = 'bold 10px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('BOSS', cx, b.y - 25);
+  ctx.textAlign = 'left';
+}
+
+function drawParticles() {
+  for (let p of particles) {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawFloatingTexts() {
+  for (let ft of floatingTexts) {
+    ctx.globalAlpha = ft.life / ft.maxLife;
+    ctx.fillStyle = ft.color;
+    ctx.font = `bold ${ft.size}px Courier New`;
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 4;
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
+}
+
+function drawBG() {
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#1a0800');
+  grad.addColorStop(1, '#0d0400');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = 'rgba(204, 102, 0, 0.03)';
+  for (let p of bgPattern) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.r);
+    ctx.fillRect(-4, -4, 8, 8);
+    ctx.restore();
+  }
+}
+
+function drawHUD() {
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold 18px Courier New';
+  ctx.textAlign = 'left';
+  ctx.fillText(`SCORE: ${score}`, 15, 28);
+
+  ctx.fillStyle = '#ff9966';
+  ctx.textAlign = 'center';
+  ctx.fillText(`LEVEL ${level}`, W / 2, 28);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#fff';
+  ctx.font = '14px Courier New';
+  ctx.fillText('LIVES:', W - 15 - lives * 22, 28);
+  for (let i = 0; i < lives; i++) {
+    const lx = W - 10 - (lives - i - 1) * 22;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(lx - 5, 15, 10, 6);
+    ctx.beginPath();
+    ctx.arc(lx - 3, 15, 4, 0, Math.PI, true);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(lx + 3, 15, 4, 0, Math.PI, true);
+    ctx.fill();
+  }
+  ctx.textAlign = 'left';
+
+  ctx.strokeStyle = '#cc6600';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, 38); ctx.lineTo(W, 38); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, H - 22); ctx.lineTo(W, H - 22); ctx.stroke();
+
+  ctx.fillStyle = '#886644';
+  ctx.font = '12px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('DEFEND THE RESTAURANT!', W / 2, H - 7);
+  ctx.textAlign = 'left';
+}
+
+function drawTitle() {
+  drawBG();
+
+  ctx.save();
+  ctx.textAlign = 'center';
+
+  ctx.shadowColor = '#ff6600';
+  ctx.shadowBlur = 25;
+  ctx.fillStyle = '#ff8833';
+  ctx.font = 'bold 48px Courier New';
+  ctx.fillText('FAMILY', W / 2, 100);
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold 48px Courier New';
+  ctx.fillText('RESTAURANT', W / 2, 155);
+  ctx.fillStyle = '#ff4422';
+  ctx.font = 'bold 54px Courier New';
+  ctx.fillText('INVADERS', W / 2, 220);
+  ctx.shadowBlur = 0;
+
+  // Show dish images on title screen
+  const time = Date.now() / 1000;
+  const keys = Object.keys(dishImages);
+  const names = ['Parfait', 'Hamburg', 'Udon Nabe', 'Cheese HB', 'Demi HB', 'Karaage'];
+  for (let i = 0; i < keys.length; i++) {
+    const img = dishImages[keys[i]];
+    const sx = 90 + i * 115;
+    const sy = 280 + Math.sin(time * 2 + i * 1.0) * 10;
+
+    if (img && img.complete && img.naturalWidth > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(sx - 32, sy - 24, 64, 48, 8);
+      ctx.clip();
+
+      const srcW = img.naturalWidth, srcH = img.naturalHeight;
+      const targetAspect = 64 / 48;
+      const srcAspect = srcW / srcH;
+      let cropX = 0, cropY = 0, cropW = srcW, cropH = srcH;
+      if (srcAspect > targetAspect) {
+        cropW = srcH * targetAspect;
+        cropX = (srcW - cropW) / 2;
+      } else {
+        cropH = srcW / targetAspect;
+        cropY = (srcH - cropH) / 2;
+      }
+      ctx.drawImage(img, cropX, cropY, cropW, cropH, sx - 32, sy - 24, 64, 48);
+      ctx.restore();
+
+      ctx.strokeStyle = '#ffaa44';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(sx - 32, sy - 24, 64, 48, 8);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#ccc';
+    ctx.font = '11px Courier New';
+    ctx.fillText(names[i], sx, sy + 35);
+  }
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#ccc';
+  ctx.font = '16px Courier New';
+  ctx.fillText('The dishes have come alive!', W / 2, 390);
+  ctx.fillText('Squirt ketchup to stop them!', W / 2, 415);
+
+  ctx.fillStyle = '#888';
+  ctx.font = '14px Courier New';
+  ctx.fillText(isTouchDevice ? 'Use on-screen buttons to move & fire!' : '[LEFT/RIGHT] Move    [SPACE] Squirt Ketchup', W / 2, 455);
+
+  if (Math.floor(time * 2) % 2 === 0) {
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 22px Courier New';
+    ctx.fillText(isTouchDevice ? 'TAP TO START' : 'PRESS ENTER TO START', W / 2, 530);
+  }
+
+  // Loading indicator
+  if (imagesLoaded < totalImages) {
+    ctx.fillStyle = '#ff6644';
+    ctx.font = '16px Courier New';
+    ctx.fillText(`Loading images... ${imagesLoaded}/${totalImages}`, W / 2, 560);
+  }
+
+  ctx.restore();
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ff4444';
+  ctx.font = 'bold 48px Courier New';
+  ctx.fillText('GAME OVER', W / 2, H / 2 - 70);
+
+  ctx.fillStyle = '#ffaa66';
+  ctx.font = '18px Courier New';
+  ctx.fillText('The food has taken over the restaurant!', W / 2, H / 2 - 25);
+
+  ctx.fillStyle = '#ffdd44';
+  ctx.font = 'bold 26px Courier New';
+  ctx.fillText(`FINAL SCORE: ${score}`, W / 2, H / 2 + 20);
+
+  let rank = '';
+  if (score >= 10000) rank = 'MASTER CHEF';
+  else if (score >= 7000) rank = 'HEAD CHEF';
+  else if (score >= 4000) rank = 'SOUS CHEF';
+  else if (score >= 2000) rank = 'LINE COOK';
+  else if (score >= 800) rank = 'PREP COOK';
+  else rank = 'DISHWASHER';
+
+  ctx.fillStyle = '#44dd88';
+  ctx.font = 'bold 22px Courier New';
+  ctx.fillText(`RANK: ${rank}`, W / 2, H / 2 + 65);
+
+  const time = Date.now() / 1000;
+  if (Math.floor(time * 2) % 2 === 0) {
+    ctx.fillStyle = '#ccc';
+    ctx.font = '18px Courier New';
+    ctx.fillText(isTouchDevice ? 'TAP TO RETRY' : 'PRESS ENTER TO RETRY', W / 2, H / 2 + 120);
+  }
+
+  ctx.restore();
+}
+
+function drawLevelClear() {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#44dd88';
+  ctx.font = 'bold 44px Courier New';
+  ctx.fillText('ORDER UP!', W / 2, H / 2 - 40);
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = '22px Courier New';
+  ctx.fillText(`Level ${level} cleared!`, W / 2, H / 2);
+  ctx.fillStyle = '#fff';
+  ctx.font = '20px Courier New';
+  ctx.fillText(`Score: ${score}`, W / 2, H / 2 + 35);
+  ctx.fillStyle = '#ff9966';
+  ctx.font = '16px Courier New';
+  ctx.fillText('More dishes incoming...', W / 2, H / 2 + 70);
+
+  const time = Date.now() / 1000;
+  if (Math.floor(time * 2) % 2 === 0) {
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 20px Courier New';
+    ctx.fillText(isTouchDevice ? 'TAP FOR NEXT LEVEL' : 'PRESS ENTER FOR NEXT LEVEL', W / 2, H / 2 + 115);
+  }
+
+  ctx.restore();
+}
+
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8,
+      life: 25 + Math.random() * 15,
+      maxLife: 40,
+      color,
+      size: Math.random() * 5 + 1
+    });
+  }
+}
+
+function spawnFoodParticles(x, y) {
+  const colors = ['#fff', '#cc6633', '#ffaa44', '#cc2200', '#44aa22', '#ffcc44'];
+  for (let i = 0; i < 12; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 7,
+      vy: (Math.random() - 0.5) * 7 - 2,
+      life: 30 + Math.random() * 15,
+      maxLife: 45,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      size: Math.random() * 4 + 1
+    });
+  }
+}
+
+function addFloatingText(x, y, text, color, size) {
+  floatingTexts.push({ x, y, text, color, size: size || 18, vy: -1.5, life: 50, maxLife: 50 });
+}
+
+function screenShake(intensity) {
+  shakeTimer = 8;
+  shakeIntensity = intensity;
+}
+
+const SPLAT_COLORS = ['#aa6622', '#cc3311', '#ddaa44', '#8b4a2f', '#ffcc44'];
+
+function update() {
+  if (gameState !== 'playing') return;
+  globalTime += 0.016;
+
+  player.x += player.dx;
+  if (player.x - player.w / 2 < 0) player.x = player.w / 2;
+  if (player.x + player.w / 2 > W) player.x = W - player.w / 2;
+  if (player.invincible > 0) player.invincible -= 0.016;
+
+  for (let b of bullets) b.y -= 8;
+  for (let b of enemyBullets) b.y += 3.5 + level * 0.25;
+  bullets = bullets.filter(b => b.y > -10);
+  enemyBullets = enemyBullets.filter(b => b.y < H + 10);
+
+  // Move invaders
+  let hitEdge = false;
+  for (let inv of invaders) {
+    if (!inv.alive) continue;
+    if ((inv.x + inv.w >= W - 8 && invaderDir > 0) || (inv.x <= 8 && invaderDir < 0)) hitEdge = true;
+  }
+  if (hitEdge) {
+    invaderDir *= -1;
+    for (let inv of invaders) { if (inv.alive) inv.y += dropAmount; }
+  }
+  for (let inv of invaders) {
+    if (inv.alive) {
+      inv.x += invaderSpeed * invaderDir;
+      inv.wobble += 0.04;
+    }
+  }
+
+  // Enemy shooting
+  shootTimer++;
+  if (shootTimer >= shootInterval) {
+    shootTimer = 0;
+    let alive = invaders.filter(i => i.alive);
+    if (alive.length > 0) {
+      let columns = {};
+      for (let inv of alive) {
+        let col = Math.round(inv.x / 130);
+        if (!columns[col] || inv.y > columns[col].y) columns[col] = inv;
+      }
+      let bottom = Object.values(columns);
+      let shooter = bottom[Math.floor(Math.random() * bottom.length)];
+      enemyBullets.push({
+        x: shooter.x + shooter.w / 2,
+        y: shooter.y + shooter.h,
+        color: SPLAT_COLORS[Math.floor(Math.random() * SPLAT_COLORS.length)]
+      });
+    }
+  }
+
+  // Boss
+  bossTimer++;
+  if (bossTimer > 1200 && !boss) {
+    bossTimer = 0;
+    bossHP = 5;
+    boss = { x: -120, y: 42, w: 140, h: 90, speed: 1.5 };
+  }
+  if (boss) {
+    boss.x += boss.speed;
+    if (boss.x > W + 90) boss = null;
+  }
+
+  // Bullet-invader collision
+  for (let b of bullets) {
+    for (let inv of invaders) {
+      if (!inv.alive) continue;
+      if (b.x >= inv.x && b.x <= inv.x + inv.w && b.y >= inv.y && b.y <= inv.y + inv.h) {
+        inv.alive = false;
+        b.y = -100;
+        score += inv.dish.points;
+        spawnFoodParticles(inv.x + inv.w / 2, inv.y + inv.h / 2);
+        addFloatingText(inv.x + inv.w / 2, inv.y, `+${inv.dish.points}`, '#ffdd44');
+        sfxHit();
+        screenShake(3);
+
+        let aliveCount = invaders.filter(i => i.alive).length;
+        invaderSpeed = 0.5 + (28 - aliveCount) * 0.08 + (level - 1) * 0.2;
+        shootInterval = Math.max(12, 80 - (28 - aliveCount) * 1.0 - level * 5);
+      }
+    }
+    // Boss hit
+    if (boss && b.x >= boss.x && b.x <= boss.x + boss.w && b.y >= boss.y && b.y <= boss.y + boss.h) {
+      bossHP--;
+      b.y = -100;
+      spawnParticles(boss.x + boss.w / 2, boss.y + boss.h / 2, '#ffcc44', 8);
+      sfxBossHit();
+      screenShake(3);
+      if (bossHP <= 0) {
+        score += 500;
+        addFloatingText(boss.x + boss.w / 2, boss.y, '+500 BOSS!', '#ffdd44', 24);
+        spawnFoodParticles(boss.x + boss.w / 2, boss.y + boss.h / 2);
+        spawnParticles(boss.x + boss.w / 2, boss.y + boss.h / 2, '#ffdd44', 20);
+        sfxBossDead();
+        screenShake(8);
+        boss = null;
+      }
+    }
+  }
+
+  // Shield collision
+  for (let shield of shields) {
+    for (let block of shield) {
+      if (!block.alive) continue;
+      for (let b of bullets) {
+        if (b.x >= block.x && b.x <= block.x + block.w && b.y >= block.y && b.y <= block.y + block.h) {
+          block.alive = false; b.y = -100;
+        }
+      }
+      for (let b of enemyBullets) {
+        if (b.x >= block.x && b.x <= block.x + block.w && b.y >= block.y && b.y <= block.y + block.h) {
+          block.alive = false; b.y = H + 100;
+        }
+      }
+    }
+  }
+
+  // Player hit
+  if (player.invincible <= 0) {
+    for (let b of enemyBullets) {
+      if (b.x >= player.x - player.w / 2 && b.x <= player.x + player.w / 2 &&
+          b.y >= player.y - player.h / 2 && b.y <= player.y + player.h / 2) {
+        lives--;
+        b.y = H + 100;
+        player.invincible = 2;
+        spawnParticles(player.x, player.y, '#fff', 15);
+        sfxPlayerHit();
+        screenShake(5);
+        if (lives <= 0) { gameState = 'gameover'; stopMusic(); sfxGameOver(); }
+      }
+    }
+  }
+
+  // Invader reaches bottom
+  for (let inv of invaders) {
+    if (inv.alive && inv.y + inv.h >= player.y - player.h / 2) { gameState = 'gameover'; stopMusic(); sfxGameOver(); }
+  }
+
+  // Particles
+  for (let p of particles) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; }
+  particles = particles.filter(p => p.life > 0);
+
+  for (let ft of floatingTexts) { ft.y += ft.vy; ft.life--; }
+  floatingTexts = floatingTexts.filter(ft => ft.life > 0);
+
+  if (shakeTimer > 0) shakeTimer--;
+
+  if (invaders.filter(i => i.alive).length === 0) { gameState = 'levelclear'; stopMusic(); sfxLevelClear(); }
+}
+
+function draw() {
+  ctx.save();
+  if (shakeTimer > 0) {
+    ctx.translate((Math.random() - 0.5) * shakeIntensity, (Math.random() - 0.5) * shakeIntensity);
+  }
+
+  drawBG();
+
+  if (gameState === 'title') { ctx.restore(); drawTitle(); return; }
+
+  drawShields();
+  drawBullets();
+
+  // Steam on all invaders
+  for (let inv of invaders) {
+    if (inv.alive) drawSteam(inv.x + inv.w / 2, inv.y);
+  }
+
+  for (let inv of invaders) { if (inv.alive) drawDish(inv); }
+  if (boss) drawBoss(boss);
+  drawPlayer();
+  drawParticles();
+  drawFloatingTexts();
+  drawHUD();
+  ctx.restore();
+
+  if (gameState === 'gameover') drawGameOver();
+  if (gameState === 'levelclear') drawLevelClear();
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+function startGame() {
+  initAudio();
+  score = 0; lives = 3; level = 1;
+  gameState = 'playing';
+  invaderSpeed = 0.5; invaderDir = 1;
+  shootTimer = 0; shootInterval = 80;
+  bossTimer = 0; boss = null;
+  player.x = W / 2; player.invincible = 0;
+  bullets = []; enemyBullets = [];
+  particles = []; floatingTexts = [];
+  globalTime = 0;
+  rowDishes = [0, 2, 3, 4];
+  createInvaders(); createShields();
+  stopMusic(); startMusic();
+}
+
+function nextLevel() {
+  level++;
+  gameState = 'playing';
+  invaderSpeed = 0.5 + (level - 1) * 0.2;
+  invaderDir = 1;
+  shootTimer = 0; shootInterval = Math.max(15, 80 - level * 5);
+  bossTimer = 0; boss = null;
+  player.x = W / 2; player.invincible = 1;
+  bullets = []; enemyBullets = [];
+  particles = []; floatingTexts = [];
+  // Rotate dish arrangement each level
+  for (let i = 0; i < rowDishes.length; i++) {
+    rowDishes[i] = (rowDishes[i] + 1) % DISHES.length;
+  }
+  createInvaders(); createShields();
+  stopMusic(); startMusic();
+}
+
+// ===== INPUT (Keyboard) =====
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (['ArrowLeft', 'ArrowRight', ' ', 'Enter'].includes(e.key)) e.preventDefault();
+  if (e.key === 'ArrowLeft') player.dx = -player.speed;
+  if (e.key === 'ArrowRight') player.dx = player.speed;
+  if (e.key === ' ' && gameState === 'playing') {
+    if (bullets.length < 3) { bullets.push({ x: player.x, y: player.y - player.h / 2 - 12 }); sfxShoot(); }
+  }
+  if (e.key === 'Enter') {
+    if (gameState === 'title') startGame();
+    else if (gameState === 'gameover') startGame();
+    else if (gameState === 'levelclear') nextLevel();
+  }
+});
+document.addEventListener('keyup', e => {
+  keys[e.key] = false;
+  if (e.key === 'ArrowLeft' && player.dx < 0) player.dx = 0;
+  if (e.key === 'ArrowRight' && player.dx > 0) player.dx = 0;
+  if (e.key === 'ArrowLeft' && keys['ArrowRight']) player.dx = player.speed;
+  if (e.key === 'ArrowRight' && keys['ArrowLeft']) player.dx = -player.speed;
+});
+
+// ===== TOUCH CONTROLS =====
+const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+const touchControls = document.getElementById('touch-controls');
+const btnLeft = document.getElementById('btn-left');
+const btnRight = document.getElementById('btn-right');
+const btnFire = document.getElementById('btn-fire');
+
+let touchLeft = false;
+let touchRight = false;
+let touchFireInterval = null;
+
+function showTouchControls() {
+  touchControls.style.display = 'flex';
+}
+function hideTouchControls() {
+  touchControls.style.display = 'none';
+}
+
+if (isTouchDevice) {
+  showTouchControls();
+}
+
+function updateTouchMovement() {
+  if (touchLeft && !touchRight) player.dx = -player.speed;
+  else if (touchRight && !touchLeft) player.dx = player.speed;
+  else player.dx = 0;
+}
+
+// Left button
+btnLeft.addEventListener('touchstart', e => {
+  e.preventDefault();
+  touchLeft = true;
+  btnLeft.classList.add('active');
+  updateTouchMovement();
+});
+btnLeft.addEventListener('touchend', e => {
+  e.preventDefault();
+  touchLeft = false;
+  btnLeft.classList.remove('active');
+  updateTouchMovement();
+});
+btnLeft.addEventListener('touchcancel', e => {
+  touchLeft = false;
+  btnLeft.classList.remove('active');
+  updateTouchMovement();
+});
+
+// Right button
+btnRight.addEventListener('touchstart', e => {
+  e.preventDefault();
+  touchRight = true;
+  btnRight.classList.add('active');
+  updateTouchMovement();
+});
+btnRight.addEventListener('touchend', e => {
+  e.preventDefault();
+  touchRight = false;
+  btnRight.classList.remove('active');
+  updateTouchMovement();
+});
+btnRight.addEventListener('touchcancel', e => {
+  touchRight = false;
+  btnRight.classList.remove('active');
+  updateTouchMovement();
+});
+
+// Fire button
+function doFire() {
+  if (gameState === 'playing' && bullets.length < 3) {
+    bullets.push({ x: player.x, y: player.y - player.h / 2 - 12 });
+    sfxShoot();
+  }
+}
+btnFire.addEventListener('touchstart', e => {
+  e.preventDefault();
+  btnFire.classList.add('active');
+  doFire();
+  // Auto-fire while held
+  touchFireInterval = setInterval(doFire, 180);
+});
+btnFire.addEventListener('touchend', e => {
+  e.preventDefault();
+  btnFire.classList.remove('active');
+  if (touchFireInterval) { clearInterval(touchFireInterval); touchFireInterval = null; }
+});
+btnFire.addEventListener('touchcancel', e => {
+  btnFire.classList.remove('active');
+  if (touchFireInterval) { clearInterval(touchFireInterval); touchFireInterval = null; }
+});
+
+// Tap canvas to start/restart (for touch devices)
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  initAudio();
+  if (gameState === 'title') startGame();
+  else if (gameState === 'gameover') startGame();
+  else if (gameState === 'levelclear') nextLevel();
+});
+// Also allow mouse click on canvas for start/restart
+canvas.addEventListener('click', e => {
+  if (gameState === 'title') startGame();
+  else if (gameState === 'gameover') startGame();
+  else if (gameState === 'levelclear') nextLevel();
+});
+
+// ===== RESPONSIVE CANVAS SCALING =====
+function resizeCanvas() {
+  const container = document.getElementById('game-container');
+  const controlsHeight = isTouchDevice ? 100 : 0;
+  const availW = window.innerWidth;
+  const availH = window.innerHeight - controlsHeight;
+  const scaleX = availW / W;
+  const scaleY = availH / H;
+  const scale = Math.min(scaleX, scaleY, 1); // don't scale up beyond 1x on large screens
+
+  canvas.style.width = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+}
+
+window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 100));
+resizeCanvas();
+
+gameLoop();
+</script>
+</body>
+</html>
