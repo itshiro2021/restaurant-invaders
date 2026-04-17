@@ -339,6 +339,10 @@ let score = 0;
 let lives = 3;
 let level = 1;
 let gameState = 'title';
+let dishKills = {}; // Track kills per dish name
+let orderCart = {}; // Track order quantities per dish name
+let kitchenOrders = []; // Orders sent to kitchen
+let kitchenAnimTimer = 0;
 let shakeTimer = 0;
 let shakeIntensity = 0;
 let globalTime = 0;
@@ -374,13 +378,27 @@ let floatingTexts = [];
 
 // Dish types using images
 const DISHES = [
-  { name: 'Matcha Parfait',    imgKey: 'parfait',        points: 40 },
-  { name: 'Hamburg Steak',     imgKey: 'hamburg_red',    points: 30 },
-  { name: 'Udon Nabe',        imgKey: 'udon_nabe',      points: 20 },
-  { name: 'Cheese Hamburg',    imgKey: 'cheese_hamburg',  points: 20 },
-  { name: 'Hamburg Demi',      imgKey: 'hamburg_demi',    points: 10 },
-  { name: 'Karaage',          imgKey: 'karaage',         points: 10 },
+  { name: 'Matcha Parfait',    imgKey: 'parfait',        points: 40, price: 680 },
+  { name: 'Hamburg Steak',     imgKey: 'hamburg_red',    points: 30, price: 980 },
+  { name: 'Udon Nabe',        imgKey: 'udon_nabe',      points: 20, price: 850 },
+  { name: 'Cheese Hamburg',    imgKey: 'cheese_hamburg',  points: 20, price: 1080 },
+  { name: 'Hamburg Demi',      imgKey: 'hamburg_demi',    points: 10, price: 880 },
+  { name: 'Karaage',          imgKey: 'karaage',         points: 10, price: 580 },
 ];
+const BOSS_PRICE = 1580;
+
+function getDiscount(sc) {
+  if (sc >= 10000) return { pct: 50, rank: 'MASTER CHEF' };
+  if (sc >= 7000)  return { pct: 40, rank: 'HEAD CHEF' };
+  if (sc >= 4000)  return { pct: 30, rank: 'SOUS CHEF' };
+  if (sc >= 2000)  return { pct: 20, rank: 'LINE COOK' };
+  if (sc >= 800)   return { pct: 10, rank: 'PREP COOK' };
+  return { pct: 0, rank: 'DISHWASHER' };
+}
+
+function discountedPrice(basePrice, pct) {
+  return Math.round(basePrice * (100 - pct) / 100);
+}
 
 // Which dishes to use per row (indices into DISHES)
 let rowDishes = [0, 2, 3, 4];
@@ -878,44 +896,551 @@ function drawTitle() {
 }
 
 function drawGameOver() {
-  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
   ctx.fillRect(0, 0, W, H);
 
   ctx.save();
   ctx.textAlign = 'center';
 
   ctx.fillStyle = '#ff4444';
-  ctx.font = 'bold 48px Courier New';
-  ctx.fillText('GAME OVER', W / 2, H / 2 - 70);
+  ctx.font = 'bold 42px Courier New';
+  ctx.fillText('GAME OVER', W / 2, 80);
 
   ctx.fillStyle = '#ffaa66';
-  ctx.font = '18px Courier New';
-  ctx.fillText('The food has taken over the restaurant!', W / 2, H / 2 - 25);
+  ctx.font = '16px Courier New';
+  ctx.fillText('The food has taken over the restaurant!', W / 2, 115);
 
   ctx.fillStyle = '#ffdd44';
-  ctx.font = 'bold 26px Courier New';
-  ctx.fillText(`FINAL SCORE: ${score}`, W / 2, H / 2 + 20);
+  ctx.font = 'bold 24px Courier New';
+  ctx.fillText(`FINAL SCORE: ${score}`, W / 2, 150);
 
-  let rank = '';
-  if (score >= 10000) rank = 'MASTER CHEF';
-  else if (score >= 7000) rank = 'HEAD CHEF';
-  else if (score >= 4000) rank = 'SOUS CHEF';
-  else if (score >= 2000) rank = 'LINE COOK';
-  else if (score >= 800) rank = 'PREP COOK';
-  else rank = 'DISHWASHER';
+  const disc = getDiscount(score);
 
   ctx.fillStyle = '#44dd88';
-  ctx.font = 'bold 22px Courier New';
-  ctx.fillText(`RANK: ${rank}`, W / 2, H / 2 + 65);
+  ctx.font = 'bold 20px Courier New';
+  ctx.fillText(`RANK: ${disc.rank}`, W / 2, 180);
 
-  const time = Date.now() / 1000;
-  if (Math.floor(time * 2) % 2 === 0) {
-    ctx.fillStyle = '#ccc';
-    ctx.font = '18px Courier New';
-    ctx.fillText(isTouchDevice ? 'TAP TO RETRY' : 'PRESS ENTER TO RETRY', W / 2, H / 2 + 120);
+  // Discount banner
+  if (disc.pct > 0) {
+    ctx.fillStyle = '#ff4444';
+    ctx.font = 'bold 22px Courier New';
+    ctx.fillText(`${disc.pct}% DISCOUNT EARNED!`, W / 2, 215);
+  } else {
+    ctx.fillStyle = '#888';
+    ctx.font = '16px Courier New';
+    ctx.fillText('Score 800+ to earn a discount!', W / 2, 215);
+  }
+
+  // Dish kill breakdown + order
+  ctx.fillStyle = '#ff9966';
+  ctx.font = 'bold 16px Courier New';
+  ctx.fillText('- TAP A DISH TO ORDER! -', W / 2, 245);
+
+  const allEntries = getGameOverEntries();
+  const totalKills = allEntries.reduce((sum, e) => sum + e.count, 0);
+
+  const startY = GO_START_Y;
+  const rowH = GO_ROW_H;
+  const tableW = GO_TABLE_W;
+  const tableX = GO_TABLE_X;
+
+  const disc2 = getDiscount(score);
+
+  // Table header
+  ctx.fillStyle = 'rgba(204, 102, 0, 0.3)';
+  ctx.fillRect(tableX, startY, tableW, 28);
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold 12px Courier New';
+  ctx.textAlign = 'left';
+  ctx.fillText('MENU', tableX + 70, startY + 19);
+  ctx.textAlign = 'center';
+  ctx.fillText('PRICE', tableX + 270, startY + 19);
+  ctx.fillText('KO', tableX + 350, startY + 19);
+  ctx.fillText('QTY', tableX + 420, startY + 19);
+  ctx.fillText('', tableX + tableW - 30, startY + 19);
+
+  // Table rows
+  for (let i = 0; i < allEntries.length; i++) {
+    const entry = allEntries[i];
+    const ry = startY + 30 + i * rowH;
+    const qty = orderCart[entry.name] || 0;
+
+    // Row background - highlight if item is in cart
+    if (qty > 0) {
+      ctx.fillStyle = 'rgba(68, 221, 136, 0.12)';
+      ctx.fillRect(tableX, ry, tableW, rowH);
+    } else if (i % 2 === 0) {
+      ctx.fillStyle = 'rgba(255, 170, 68, 0.08)';
+      ctx.fillRect(tableX, ry, tableW, rowH);
+    }
+
+    // Draw dish thumbnail
+    const img = dishImages[entry.imgKey];
+    const thumbX = tableX + 10;
+    const thumbY = ry + 6;
+    const thumbW = 48;
+    const thumbH = 36;
+    if (img && img.complete && img.naturalWidth > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(thumbX, thumbY, thumbW, thumbH, 5);
+      ctx.clip();
+      const srcW = img.naturalWidth, srcH = img.naturalHeight;
+      const targetAspect = thumbW / thumbH;
+      const srcAspect = srcW / srcH;
+      let sx = 0, sy = 0, sW = srcW, sH = srcH;
+      if (srcAspect > targetAspect) { sW = srcH * targetAspect; sx = (srcW - sW) / 2; }
+      else { sH = srcW / targetAspect; sy = (srcH - sH) / 2; }
+      ctx.drawImage(img, sx, sy, sW, sH, thumbX, thumbY, thumbW, thumbH);
+      ctx.restore();
+      ctx.strokeStyle = entry.isBoss ? '#ffdd44' : '#ffaa44';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(thumbX, thumbY, thumbW, thumbH, 5);
+      ctx.stroke();
+    }
+
+    // Dish name
+    ctx.textAlign = 'left';
+    ctx.fillStyle = entry.isBoss ? '#ffdd44' : '#fff';
+    ctx.font = entry.isBoss ? 'bold 14px Courier New' : '14px Courier New';
+    ctx.fillText(entry.name, tableX + 70, ry + 25);
+
+    // Price with discount
+    const basePrice = entry.price;
+    const salePrice = discountedPrice(basePrice, disc2.pct);
+    ctx.textAlign = 'center';
+    if (disc2.pct > 0) {
+      // Strikethrough original price
+      ctx.fillStyle = '#886655';
+      ctx.font = '11px Courier New';
+      const origText = `${basePrice}`;
+      ctx.fillText(origText, tableX + 270, ry + 20);
+      const origW = ctx.measureText(origText).width;
+      ctx.strokeStyle = '#886655';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(tableX + 270 - origW / 2 - 2, ry + 17);
+      ctx.lineTo(tableX + 270 + origW / 2 + 2, ry + 17);
+      ctx.stroke();
+      // Discounted price
+      ctx.fillStyle = '#ff4444';
+      ctx.font = 'bold 14px Courier New';
+      ctx.fillText(`¥${salePrice}`, tableX + 270, ry + 38);
+    } else {
+      ctx.fillStyle = '#ffaa66';
+      ctx.font = '14px Courier New';
+      ctx.fillText(`¥${basePrice}`, tableX + 270, ry + 32);
+    }
+
+    // Kill count
+    ctx.fillStyle = entry.count > 0 ? '#44dd88' : '#666';
+    ctx.font = 'bold 15px Courier New';
+    ctx.fillText(`${entry.count}`, tableX + 350, ry + 32);
+
+    // Order quantity
+    ctx.fillStyle = qty > 0 ? '#ffdd44' : '#666';
+    ctx.font = 'bold 15px Courier New';
+    ctx.fillText(`${qty}`, tableX + 420, ry + 32);
+
+    // "+" button
+    const btnX = tableX + tableW - 52;
+    const btnY = ry + 16;
+    ctx.fillStyle = '#cc6600';
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, GO_ORDER_BTN_W, GO_ORDER_BTN_H, 5);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('+', btnX + GO_ORDER_BTN_W / 2, btnY + 20);
+
+    // "-" button (only if qty > 0)
+    if (qty > 0) {
+      const minusBtnX = btnX - 34;
+      ctx.fillStyle = '#883300';
+      ctx.beginPath();
+      ctx.roundRect(minusBtnX, btnY, GO_ORDER_BTN_W, GO_ORDER_BTN_H, 5);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 18px Courier New';
+      ctx.fillText('-', minusBtnX + GO_ORDER_BTN_W / 2, btnY + 20);
+    }
+  }
+
+  // Total line
+  const totalY = startY + 30 + allEntries.length * rowH + 8;
+  ctx.fillStyle = 'rgba(204, 102, 0, 0.3)';
+  ctx.fillRect(tableX, totalY, tableW, 28);
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold 14px Courier New';
+  ctx.textAlign = 'left';
+  ctx.fillText('TOTAL', tableX + 70, totalY + 19);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#44dd88';
+  ctx.font = 'bold 15px Courier New';
+  ctx.fillText(`${totalKills}`, tableX + 350, totalY + 20);
+
+  // Order total qty and price
+  const orderTotal = Object.values(orderCart).reduce((s, v) => s + v, 0);
+  ctx.fillStyle = '#ffdd44';
+  ctx.fillText(`${orderTotal}`, tableX + 420, totalY + 20);
+
+  // Calculate total price
+  let totalPrice = 0;
+  for (const entry of allEntries) {
+    const qty = orderCart[entry.name] || 0;
+    if (qty > 0) totalPrice += discountedPrice(entry.price, disc2.pct) * qty;
+  }
+  if (orderTotal > 0) {
+    ctx.fillStyle = '#ff4444';
+    ctx.font = 'bold 14px Courier New';
+    ctx.fillText(`¥${totalPrice}`, tableX + 270, totalY + 20);
+  }
+
+  // SEND TO KITCHEN button
+  const sendBtnW = 280;
+  const sendBtnH = 44;
+  const sendBtnX = W / 2 - sendBtnW / 2;
+  const sendBtnY = totalY + 48;
+  if (orderTotal > 0) {
+    const time = Date.now() / 1000;
+    const pulse = Math.sin(time * 4) * 0.15 + 0.85;
+    ctx.fillStyle = `rgba(68, 221, 136, ${pulse})`;
+    ctx.beginPath();
+    ctx.roundRect(sendBtnX, sendBtnY, sendBtnW, sendBtnH, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#88ffbb';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(sendBtnX, sendBtnY, sendBtnW, sendBtnH, 8);
+    ctx.stroke();
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 18px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('SEND TO KITCHEN', W / 2, sendBtnY + 28);
+  }
+
+  // Retry prompt below
+  const promptY = sendBtnY + sendBtnH + 30;
+  const time2 = Date.now() / 1000;
+  if (Math.floor(time2 * 2) % 2 === 0) {
+    ctx.fillStyle = '#888';
+    ctx.font = '14px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(isTouchDevice ? 'TAP OUTSIDE TABLE TO RETRY' : 'PRESS ENTER TO RETRY', W / 2, promptY);
   }
 
   ctx.restore();
+}
+
+function handleGameOverClick(cx, cy) {
+  const allEntries = getGameOverEntries();
+  const startY = GO_START_Y;
+  const rowH = GO_ROW_H;
+  const tableX = GO_TABLE_X;
+  const tableW = GO_TABLE_W;
+
+  // Check +/- buttons for each row
+  for (let i = 0; i < allEntries.length; i++) {
+    const entry = allEntries[i];
+    const ry = startY + 30 + i * rowH;
+    const btnX = tableX + tableW - 52;
+    const btnY = ry + 16;
+    const qty = orderCart[entry.name] || 0;
+
+    // "+" button
+    if (cx >= btnX && cx <= btnX + GO_ORDER_BTN_W && cy >= btnY && cy <= btnY + GO_ORDER_BTN_H) {
+      orderCart[entry.name] = (orderCart[entry.name] || 0) + 1;
+      sfxOrder();
+      return true;
+    }
+
+    // "-" button
+    if (qty > 0) {
+      const minusBtnX = btnX - 34;
+      if (cx >= minusBtnX && cx <= minusBtnX + GO_ORDER_BTN_W && cy >= btnY && cy <= btnY + GO_ORDER_BTN_H) {
+        orderCart[entry.name] = Math.max(0, (orderCart[entry.name] || 0) - 1);
+        if (orderCart[entry.name] === 0) delete orderCart[entry.name];
+        sfxOrder();
+        return true;
+      }
+    }
+  }
+
+  // Check SEND TO KITCHEN button
+  const orderTotal = Object.values(orderCart).reduce((s, v) => s + v, 0);
+  if (orderTotal > 0) {
+    const totalY = startY + 30 + allEntries.length * rowH + 8;
+    const sendBtnW = 280;
+    const sendBtnH = 44;
+    const sendBtnX = W / 2 - sendBtnW / 2;
+    const sendBtnY = totalY + 48;
+    if (cx >= sendBtnX && cx <= sendBtnX + sendBtnW && cy >= sendBtnY && cy <= sendBtnY + sendBtnH) {
+      // Send order to kitchen
+      const disc3 = getDiscount(score);
+      const orderItems = [];
+      for (const dish of DISHES) {
+        if (orderCart[dish.name] > 0) {
+          orderItems.push({ name: dish.name, imgKey: dish.imgKey, qty: orderCart[dish.name], unitPrice: discountedPrice(dish.price, disc3.pct) });
+        }
+      }
+      if (orderCart['BOSS Karaage'] > 0) {
+        orderItems.push({ name: 'BOSS Karaage', imgKey: 'karaage', qty: orderCart['BOSS Karaage'], unitPrice: discountedPrice(BOSS_PRICE, disc3.pct) });
+      }
+      kitchenOrders.push({ items: orderItems, time: Date.now(), status: 'NEW', discount: disc3.pct });
+      orderCart = {};
+      kitchenAnimTimer = 0;
+      sfxSendOrder();
+      gameState = 'kitchen';
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function drawKitchenDisplay() {
+  // Dark kitchen background
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a1520');
+  grad.addColorStop(1, '#051010');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+
+  // Header bar
+  ctx.fillStyle = '#1a3040';
+  ctx.fillRect(0, 0, W, 60);
+  ctx.fillStyle = '#44dd88';
+  ctx.font = 'bold 28px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('KITCHEN DISPLAY', W / 2, 40);
+
+  // Clock
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString();
+  ctx.fillStyle = '#88aacc';
+  ctx.font = '16px Courier New';
+  ctx.textAlign = 'right';
+  ctx.fillText(timeStr, W - 20, 40);
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#446688';
+  ctx.font = '14px Courier New';
+  ctx.fillText('Family Restaurant Invaders', 20, 40);
+
+  // Animate timer
+  kitchenAnimTimer += 0.016;
+
+  // Draw each order as a ticket
+  const ticketW = 320;
+  const ticketPad = 30;
+  const startX = (W - (Math.min(kitchenOrders.length, 3) * (ticketW + ticketPad) - ticketPad)) / 2;
+
+  for (let o = 0; o < kitchenOrders.length; o++) {
+    const order = kitchenOrders[o];
+    const tx = startX + o * (ticketW + ticketPad);
+    const ty = 90;
+
+    // Slide-in animation for latest order
+    let offsetY = 0;
+    if (o === kitchenOrders.length - 1 && kitchenAnimTimer < 0.5) {
+      offsetY = (1 - kitchenAnimTimer / 0.5) * -80;
+    }
+
+    // Ticket background
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.roundRect(tx, ty + offsetY, ticketW, 20 + order.items.length * 70 + 60, 8);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Ticket header - status color
+    const elapsed = (Date.now() - order.time) / 1000;
+    let statusColor = '#44dd88';
+    let statusText = 'NEW';
+    if (elapsed > 10) { statusColor = '#ddaa44'; statusText = 'COOKING'; }
+    if (elapsed > 20) { statusColor = '#ff6644'; statusText = 'READY'; }
+
+    ctx.fillStyle = statusColor;
+    ctx.beginPath();
+    ctx.roundRect(tx, ty + offsetY, ticketW, 36, {tl: 8, tr: 8, br: 0, bl: 0});
+    ctx.fill();
+
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 16px Courier New';
+    ctx.textAlign = 'left';
+    ctx.fillText(`ORDER #${String(o + 1).padStart(3, '0')}`, tx + 12, ty + offsetY + 24);
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 14px Courier New';
+    ctx.fillText(statusText, tx + ticketW - 12, ty + offsetY + 24);
+
+    // Order time + discount
+    const orderTime = new Date(order.time);
+    ctx.fillStyle = '#666';
+    ctx.font = '11px Courier New';
+    ctx.textAlign = 'left';
+    ctx.fillText(orderTime.toLocaleTimeString(), tx + 12, ty + offsetY + 52);
+    if (order.discount > 0) {
+      ctx.fillStyle = '#cc0000';
+      ctx.font = 'bold 12px Courier New';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${order.discount}% OFF`, tx + ticketW - 12, ty + offsetY + 52);
+    }
+
+    // Dashed separator
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(tx + 10, ty + offsetY + 58);
+    ctx.lineTo(tx + ticketW - 10, ty + offsetY + 58);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Order items
+    for (let j = 0; j < order.items.length; j++) {
+      const item = order.items[j];
+      const iy = ty + offsetY + 65 + j * 70;
+
+      // Item thumbnail
+      const img = dishImages[item.imgKey];
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(tx + 12, iy, 54, 40, 5);
+        ctx.clip();
+        const srcW = img.naturalWidth, srcH = img.naturalHeight;
+        const targetAspect = 54 / 40;
+        const srcAspect = srcW / srcH;
+        let sx = 0, sy = 0, sW = srcW, sH = srcH;
+        if (srcAspect > targetAspect) { sW = srcH * targetAspect; sx = (srcW - sW) / 2; }
+        else { sH = srcW / targetAspect; sy = (srcH - sH) / 2; }
+        ctx.drawImage(img, sx, sy, sW, sH, tx + 12, iy, 54, 40);
+        ctx.restore();
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(tx + 12, iy, 54, 40, 5);
+        ctx.stroke();
+      }
+
+      // Item name, qty & price
+      ctx.fillStyle = '#222';
+      ctx.font = '13px Courier New';
+      ctx.textAlign = 'left';
+      ctx.fillText(item.name, tx + 76, iy + 16);
+      ctx.fillStyle = '#888';
+      ctx.font = '11px Courier New';
+      ctx.fillText(`¥${item.unitPrice} each`, tx + 76, iy + 32);
+      ctx.fillStyle = '#cc6600';
+      ctx.font = 'bold 16px Courier New';
+      ctx.textAlign = 'right';
+      ctx.fillText(`x${item.qty}`, tx + ticketW - 15, iy + 18);
+      ctx.fillStyle = '#222';
+      ctx.font = 'bold 13px Courier New';
+      ctx.fillText(`¥${item.unitPrice * item.qty}`, tx + ticketW - 15, iy + 35);
+
+      // Separator line between items
+      if (j < order.items.length - 1) {
+        ctx.strokeStyle = '#eee';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(tx + 12, iy + 52);
+        ctx.lineTo(tx + ticketW - 12, iy + 52);
+        ctx.stroke();
+      }
+    }
+
+    // Total items + price
+    const totalQty = order.items.reduce((s, it) => s + it.qty, 0);
+    const totalAmt = order.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
+    const bottomY = ty + offsetY + 65 + order.items.length * 70;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#aaa';
+    ctx.beginPath();
+    ctx.moveTo(tx + 10, bottomY - 8);
+    ctx.lineTo(tx + ticketW - 10, bottomY - 8);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#222';
+    ctx.font = 'bold 14px Courier New';
+    ctx.textAlign = 'left';
+    ctx.fillText(`TOTAL: ${totalQty} items`, tx + 12, bottomY + 10);
+    ctx.fillStyle = '#cc0000';
+    ctx.font = 'bold 16px Courier New';
+    ctx.textAlign = 'right';
+    ctx.fillText(`¥${totalAmt}`, tx + ticketW - 12, bottomY + 12);
+  }
+
+  // Bottom buttons
+  ctx.textAlign = 'center';
+
+  // "BACK" button
+  const backBtnW = 200;
+  const backBtnH = 44;
+  const backBtnX = W / 2 - backBtnW - 20;
+  const backBtnY = H - 80;
+  ctx.fillStyle = '#334455';
+  ctx.beginPath();
+  ctx.roundRect(backBtnX, backBtnY, backBtnW, backBtnH, 8);
+  ctx.fill();
+  ctx.strokeStyle = '#556677';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(backBtnX, backBtnY, backBtnW, backBtnH, 8);
+  ctx.stroke();
+  ctx.fillStyle = '#aaccdd';
+  ctx.font = 'bold 16px Courier New';
+  ctx.fillText('ORDER MORE', backBtnX + backBtnW / 2, backBtnY + 28);
+
+  // "PLAY AGAIN" button
+  const playBtnW = 200;
+  const playBtnH = 44;
+  const playBtnX = W / 2 + 20;
+  const playBtnY = H - 80;
+  ctx.fillStyle = '#cc6600';
+  ctx.beginPath();
+  ctx.roundRect(playBtnX, playBtnY, playBtnW, playBtnH, 8);
+  ctx.fill();
+  ctx.strokeStyle = '#ff8833';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(playBtnX, playBtnY, playBtnW, playBtnH, 8);
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 16px Courier New';
+  ctx.fillText('PLAY AGAIN', playBtnX + playBtnW / 2, playBtnY + 28);
+
+  ctx.restore();
+}
+
+function handleKitchenClick(cx, cy) {
+  // "ORDER MORE" button
+  const backBtnW = 200;
+  const backBtnH = 44;
+  const backBtnX = W / 2 - backBtnW - 20;
+  const backBtnY = H - 80;
+  if (cx >= backBtnX && cx <= backBtnX + backBtnW && cy >= backBtnY && cy <= backBtnY + backBtnH) {
+    gameState = 'gameover';
+    return true;
+  }
+
+  // "PLAY AGAIN" button
+  const playBtnW = 200;
+  const playBtnH = 44;
+  const playBtnX = W / 2 + 20;
+  const playBtnY = H - 80;
+  if (cx >= playBtnX && cx <= playBtnX + playBtnW && cy >= playBtnY && cy <= playBtnY + playBtnH) {
+    startGame();
+    return true;
+  }
+
+  return false;
 }
 
 function drawLevelClear() {
@@ -984,6 +1509,46 @@ function addFloatingText(x, y, text, color, size) {
 function screenShake(intensity) {
   shakeTimer = 8;
   shakeIntensity = intensity;
+}
+
+// Convert mouse/touch event to canvas coordinates
+function canvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+}
+
+// Game over screen layout constants (shared between draw and click handling)
+const GO_TABLE_W = 640;
+const GO_TABLE_X = (W - GO_TABLE_W) / 2;
+const GO_START_Y = 258;
+const GO_ROW_H = 55;
+const GO_ORDER_BTN_X = GO_TABLE_X + GO_TABLE_W - 38;
+const GO_ORDER_BTN_W = 28;
+const GO_ORDER_BTN_H = 28;
+
+function getGameOverEntries() {
+  const entries = [];
+  for (const dish of DISHES) {
+    entries.push({ name: dish.name, imgKey: dish.imgKey, points: dish.points, price: dish.price, count: dishKills[dish.name] || 0 });
+  }
+  entries.push({ name: 'BOSS Karaage', imgKey: 'karaage', points: 500, price: BOSS_PRICE, count: dishKills['BOSS Karaage'] || 0, isBoss: true });
+  return entries;
+}
+
+function sfxOrder() {
+  if (!audioCtx) return;
+  playSfx(880, 0.08, 'triangle', 0.25);
+  playSfx(1100, 0.06, 'triangle', 0.2);
+}
+
+function sfxSendOrder() {
+  if (!audioCtx) return;
+  const melody = [660, 880, 1100, 1320];
+  melody.forEach((f, i) => setTimeout(() => playSfx(f, 0.12, 'triangle', 0.25), i * 80));
 }
 
 const SPLAT_COLORS = ['#aa6622', '#cc3311', '#ddaa44', '#8b4a2f', '#ffcc44'];
@@ -1060,6 +1625,7 @@ function update() {
         inv.alive = false;
         b.y = -100;
         score += inv.dish.points;
+        dishKills[inv.dish.name] = (dishKills[inv.dish.name] || 0) + 1;
         spawnFoodParticles(inv.x + inv.w / 2, inv.y + inv.h / 2);
         addFloatingText(inv.x + inv.w / 2, inv.y, `+${inv.dish.points}`, '#ffdd44');
         sfxHit();
@@ -1079,6 +1645,7 @@ function update() {
       screenShake(3);
       if (bossHP <= 0) {
         score += 500;
+        dishKills['BOSS Karaage'] = (dishKills['BOSS Karaage'] || 0) + 1;
         addFloatingText(boss.x + boss.w / 2, boss.y, '+500 BOSS!', '#ffdd44', 24);
         spawnFoodParticles(boss.x + boss.w / 2, boss.y + boss.h / 2);
         spawnParticles(boss.x + boss.w / 2, boss.y + boss.h / 2, '#ffdd44', 20);
@@ -1167,6 +1734,7 @@ function draw() {
 
   if (gameState === 'gameover') drawGameOver();
   if (gameState === 'levelclear') drawLevelClear();
+  if (gameState === 'kitchen') { ctx.save(); drawKitchenDisplay(); ctx.restore(); }
 }
 
 function gameLoop() {
@@ -1178,6 +1746,9 @@ function gameLoop() {
 function startGame() {
   initAudio();
   score = 0; lives = 3; level = 1;
+  dishKills = {};
+  orderCart = {};
+  kitchenOrders = [];
   gameState = 'playing';
   invaderSpeed = 0.5; invaderDir = 1;
   shootTimer = 0; shootInterval = 80;
@@ -1223,6 +1794,7 @@ document.addEventListener('keydown', e => {
     if (gameState === 'title') startGame();
     else if (gameState === 'gameover') startGame();
     else if (gameState === 'levelclear') nextLevel();
+    else if (gameState === 'kitchen') startGame();
   }
 });
 document.addEventListener('keyup', e => {
@@ -1327,15 +1899,33 @@ btnFire.addEventListener('touchcancel', e => {
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
   initAudio();
-  if (gameState === 'title') startGame();
-  else if (gameState === 'gameover') startGame();
-  else if (gameState === 'levelclear') nextLevel();
+  if (gameState === 'title') { startGame(); return; }
+  if (gameState === 'levelclear') { nextLevel(); return; }
+  if (gameState === 'gameover') {
+    const pos = canvasCoords(e);
+    if (!handleGameOverClick(pos.x, pos.y)) startGame();
+    return;
+  }
+  if (gameState === 'kitchen') {
+    const pos = canvasCoords(e);
+    handleKitchenClick(pos.x, pos.y);
+    return;
+  }
 });
 // Also allow mouse click on canvas for start/restart
 canvas.addEventListener('click', e => {
-  if (gameState === 'title') startGame();
-  else if (gameState === 'gameover') startGame();
-  else if (gameState === 'levelclear') nextLevel();
+  if (gameState === 'title') { startGame(); return; }
+  if (gameState === 'levelclear') { nextLevel(); return; }
+  if (gameState === 'gameover') {
+    const pos = canvasCoords(e);
+    if (!handleGameOverClick(pos.x, pos.y)) startGame();
+    return;
+  }
+  if (gameState === 'kitchen') {
+    const pos = canvasCoords(e);
+    handleKitchenClick(pos.x, pos.y);
+    return;
+  }
 });
 
 // ===== RESPONSIVE CANVAS SCALING =====
