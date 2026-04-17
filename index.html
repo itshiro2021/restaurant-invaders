@@ -387,13 +387,23 @@ const DISHES = [
 ];
 const BOSS_PRICE = 1580;
 
-function getDiscount(sc) {
-  if (sc >= 10000) return { pct: 50, rank: 'MASTER CHEF' };
-  if (sc >= 7000)  return { pct: 40, rank: 'HEAD CHEF' };
-  if (sc >= 4000)  return { pct: 30, rank: 'SOUS CHEF' };
-  if (sc >= 2000)  return { pct: 20, rank: 'LINE COOK' };
-  if (sc >= 800)   return { pct: 10, rank: 'PREP COOK' };
-  return { pct: 0, rank: 'DISHWASHER' };
+// Per-dish discount based on number of that dish defeated
+function getDishDiscount(kills) {
+  if (kills >= 15) return 50;
+  if (kills >= 10) return 40;
+  if (kills >= 7)  return 30;
+  if (kills >= 4)  return 20;
+  if (kills >= 1)  return 10;
+  return 0;
+}
+
+function getRank(sc) {
+  if (sc >= 10000) return 'MASTER CHEF';
+  if (sc >= 7000)  return 'HEAD CHEF';
+  if (sc >= 4000)  return 'SOUS CHEF';
+  if (sc >= 2000)  return 'LINE COOK';
+  if (sc >= 800)   return 'PREP COOK';
+  return 'DISHWASHER';
 }
 
 function discountedPrice(basePrice, pct) {
@@ -914,27 +924,19 @@ function drawGameOver() {
   ctx.font = 'bold 24px Courier New';
   ctx.fillText(`FINAL SCORE: ${score}`, W / 2, 150);
 
-  const disc = getDiscount(score);
-
   ctx.fillStyle = '#44dd88';
   ctx.font = 'bold 20px Courier New';
-  ctx.fillText(`RANK: ${disc.rank}`, W / 2, 180);
+  ctx.fillText(`RANK: ${getRank(score)}`, W / 2, 180);
 
-  // Discount banner
-  if (disc.pct > 0) {
-    ctx.fillStyle = '#ff4444';
-    ctx.font = 'bold 22px Courier New';
-    ctx.fillText(`${disc.pct}% DISCOUNT EARNED!`, W / 2, 215);
-  } else {
-    ctx.fillStyle = '#888';
-    ctx.font = '16px Courier New';
-    ctx.fillText('Score 800+ to earn a discount!', W / 2, 215);
-  }
+  // Per-dish discount explanation
+  ctx.fillStyle = '#ff9966';
+  ctx.font = '14px Courier New';
+  ctx.fillText('Defeat more of each dish for a bigger discount!', W / 2, 210);
 
   // Dish kill breakdown + order
-  ctx.fillStyle = '#ff9966';
+  ctx.fillStyle = '#ffcc44';
   ctx.font = 'bold 16px Courier New';
-  ctx.fillText('- TAP A DISH TO ORDER! -', W / 2, 245);
+  ctx.fillText('- TAP A DISH TO ORDER! -', W / 2, 235);
 
   const allEntries = getGameOverEntries();
   const totalKills = allEntries.reduce((sum, e) => sum + e.count, 0);
@@ -944,19 +946,18 @@ function drawGameOver() {
   const tableW = GO_TABLE_W;
   const tableX = GO_TABLE_X;
 
-  const disc2 = getDiscount(score);
-
   // Table header
   ctx.fillStyle = 'rgba(204, 102, 0, 0.3)';
   ctx.fillRect(tableX, startY, tableW, 28);
   ctx.fillStyle = '#ffcc44';
-  ctx.font = 'bold 12px Courier New';
+  ctx.font = 'bold 11px Courier New';
   ctx.textAlign = 'left';
   ctx.fillText('MENU', tableX + 70, startY + 19);
   ctx.textAlign = 'center';
-  ctx.fillText('PRICE', tableX + 270, startY + 19);
-  ctx.fillText('KO', tableX + 350, startY + 19);
-  ctx.fillText('QTY', tableX + 420, startY + 19);
+  ctx.fillText('KO', tableX + 240, startY + 19);
+  ctx.fillText('OFF', tableX + 295, startY + 19);
+  ctx.fillText('PRICE', tableX + 380, startY + 19);
+  ctx.fillText('QTY', tableX + 460, startY + 19);
   ctx.fillText('', tableX + tableW - 30, startY + 19);
 
   // Table rows
@@ -1003,45 +1004,60 @@ function drawGameOver() {
     // Dish name
     ctx.textAlign = 'left';
     ctx.fillStyle = entry.isBoss ? '#ffdd44' : '#fff';
-    ctx.font = entry.isBoss ? 'bold 14px Courier New' : '14px Courier New';
-    ctx.fillText(entry.name, tableX + 70, ry + 25);
+    ctx.font = entry.isBoss ? 'bold 13px Courier New' : '13px Courier New';
+    ctx.fillText(entry.name, tableX + 70, ry + 28);
 
-    // Price with discount
+    // Per-dish discount
+    const dishDisc = getDishDiscount(entry.count);
     const basePrice = entry.price;
-    const salePrice = discountedPrice(basePrice, disc2.pct);
+    const salePrice = discountedPrice(basePrice, dishDisc);
+
+    // Kill count
     ctx.textAlign = 'center';
-    if (disc2.pct > 0) {
-      // Strikethrough original price
+    ctx.fillStyle = entry.count > 0 ? '#44dd88' : '#666';
+    ctx.font = 'bold 15px Courier New';
+    ctx.fillText(`${entry.count}`, tableX + 240, ry + 30);
+
+    // Discount %
+    if (dishDisc > 0) {
+      ctx.fillStyle = '#ff4444';
+      ctx.font = 'bold 14px Courier New';
+      ctx.fillText(`${dishDisc}%`, tableX + 295, ry + 30);
+    } else {
+      ctx.fillStyle = '#555';
+      ctx.font = '12px Courier New';
+      ctx.fillText('--', tableX + 295, ry + 30);
+    }
+
+    // Price
+    ctx.textAlign = 'center';
+    if (dishDisc > 0) {
+      // Strikethrough original
       ctx.fillStyle = '#886655';
-      ctx.font = '11px Courier New';
-      const origText = `${basePrice}`;
-      ctx.fillText(origText, tableX + 270, ry + 20);
+      ctx.font = '10px Courier New';
+      const origText = `¥${basePrice}`;
+      ctx.fillText(origText, tableX + 380, ry + 18);
       const origW = ctx.measureText(origText).width;
       ctx.strokeStyle = '#886655';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(tableX + 270 - origW / 2 - 2, ry + 17);
-      ctx.lineTo(tableX + 270 + origW / 2 + 2, ry + 17);
+      ctx.moveTo(tableX + 380 - origW / 2 - 2, ry + 15);
+      ctx.lineTo(tableX + 380 + origW / 2 + 2, ry + 15);
       ctx.stroke();
       // Discounted price
       ctx.fillStyle = '#ff4444';
       ctx.font = 'bold 14px Courier New';
-      ctx.fillText(`¥${salePrice}`, tableX + 270, ry + 38);
+      ctx.fillText(`¥${salePrice}`, tableX + 380, ry + 38);
     } else {
       ctx.fillStyle = '#ffaa66';
       ctx.font = '14px Courier New';
-      ctx.fillText(`¥${basePrice}`, tableX + 270, ry + 32);
+      ctx.fillText(`¥${basePrice}`, tableX + 380, ry + 30);
     }
-
-    // Kill count
-    ctx.fillStyle = entry.count > 0 ? '#44dd88' : '#666';
-    ctx.font = 'bold 15px Courier New';
-    ctx.fillText(`${entry.count}`, tableX + 350, ry + 32);
 
     // Order quantity
     ctx.fillStyle = qty > 0 ? '#ffdd44' : '#666';
     ctx.font = 'bold 15px Courier New';
-    ctx.fillText(`${qty}`, tableX + 420, ry + 32);
+    ctx.fillText(`${qty}`, tableX + 460, ry + 30);
 
     // "+" button
     const btnX = tableX + tableW - 52;
@@ -1079,23 +1095,41 @@ function drawGameOver() {
   ctx.textAlign = 'center';
   ctx.fillStyle = '#44dd88';
   ctx.font = 'bold 15px Courier New';
-  ctx.fillText(`${totalKills}`, tableX + 350, totalY + 20);
+  ctx.fillText(`${totalKills}`, tableX + 240, totalY + 20);
 
   // Order total qty and price
   const orderTotal = Object.values(orderCart).reduce((s, v) => s + v, 0);
   ctx.fillStyle = '#ffdd44';
-  ctx.fillText(`${orderTotal}`, tableX + 420, totalY + 20);
+  ctx.fillText(`${orderTotal}`, tableX + 460, totalY + 20);
 
-  // Calculate total price
+  // Calculate total price using per-dish discounts
   let totalPrice = 0;
+  let totalOriginal = 0;
   for (const entry of allEntries) {
     const qty = orderCart[entry.name] || 0;
-    if (qty > 0) totalPrice += discountedPrice(entry.price, disc2.pct) * qty;
+    if (qty > 0) {
+      const dd = getDishDiscount(entry.count);
+      totalPrice += discountedPrice(entry.price, dd) * qty;
+      totalOriginal += entry.price * qty;
+    }
   }
   if (orderTotal > 0) {
+    if (totalOriginal > totalPrice) {
+      ctx.fillStyle = '#886655';
+      ctx.font = '10px Courier New';
+      const origTotalText = `¥${totalOriginal}`;
+      ctx.fillText(origTotalText, tableX + 380, totalY + 12);
+      const origTW = ctx.measureText(origTotalText).width;
+      ctx.strokeStyle = '#886655';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(tableX + 380 - origTW / 2 - 2, totalY + 9);
+      ctx.lineTo(tableX + 380 + origTW / 2 + 2, totalY + 9);
+      ctx.stroke();
+    }
     ctx.fillStyle = '#ff4444';
     ctx.font = 'bold 14px Courier New';
-    ctx.fillText(`¥${totalPrice}`, tableX + 270, totalY + 20);
+    ctx.fillText(`¥${totalPrice}`, tableX + 380, totalY + 26);
   }
 
   // SEND TO KITCHEN button
@@ -1177,18 +1211,19 @@ function handleGameOverClick(cx, cy) {
     const sendBtnX = W / 2 - sendBtnW / 2;
     const sendBtnY = totalY + 48;
     if (cx >= sendBtnX && cx <= sendBtnX + sendBtnW && cy >= sendBtnY && cy <= sendBtnY + sendBtnH) {
-      // Send order to kitchen
-      const disc3 = getDiscount(score);
+      // Send order to kitchen with per-dish discounts
       const orderItems = [];
       for (const dish of DISHES) {
         if (orderCart[dish.name] > 0) {
-          orderItems.push({ name: dish.name, imgKey: dish.imgKey, qty: orderCart[dish.name], unitPrice: discountedPrice(dish.price, disc3.pct) });
+          const dd = getDishDiscount(dishKills[dish.name] || 0);
+          orderItems.push({ name: dish.name, imgKey: dish.imgKey, qty: orderCart[dish.name], unitPrice: discountedPrice(dish.price, dd), discount: dd });
         }
       }
       if (orderCart['BOSS Karaage'] > 0) {
-        orderItems.push({ name: 'BOSS Karaage', imgKey: 'karaage', qty: orderCart['BOSS Karaage'], unitPrice: discountedPrice(BOSS_PRICE, disc3.pct) });
+        const dd = getDishDiscount(dishKills['BOSS Karaage'] || 0);
+        orderItems.push({ name: 'BOSS Karaage', imgKey: 'karaage', qty: orderCart['BOSS Karaage'], unitPrice: discountedPrice(BOSS_PRICE, dd), discount: dd });
       }
-      kitchenOrders.push({ items: orderItems, time: Date.now(), status: 'NEW', discount: disc3.pct });
+      kitchenOrders.push({ items: orderItems, time: Date.now(), status: 'NEW' });
       orderCart = {};
       kitchenAnimTimer = 0;
       sfxSendOrder();
@@ -1279,18 +1314,12 @@ function drawKitchenDisplay() {
     ctx.font = 'bold 14px Courier New';
     ctx.fillText(statusText, tx + ticketW - 12, ty + offsetY + 24);
 
-    // Order time + discount
+    // Order time
     const orderTime = new Date(order.time);
     ctx.fillStyle = '#666';
     ctx.font = '11px Courier New';
     ctx.textAlign = 'left';
     ctx.fillText(orderTime.toLocaleTimeString(), tx + 12, ty + offsetY + 52);
-    if (order.discount > 0) {
-      ctx.fillStyle = '#cc0000';
-      ctx.font = 'bold 12px Courier New';
-      ctx.textAlign = 'right';
-      ctx.fillText(`${order.discount}% OFF`, tx + ticketW - 12, ty + offsetY + 52);
-    }
 
     // Dashed separator
     ctx.setLineDash([4, 3]);
@@ -1336,7 +1365,8 @@ function drawKitchenDisplay() {
       ctx.fillText(item.name, tx + 76, iy + 16);
       ctx.fillStyle = '#888';
       ctx.font = '11px Courier New';
-      ctx.fillText(`¥${item.unitPrice} each`, tx + 76, iy + 32);
+      const priceLabel = item.discount > 0 ? `¥${item.unitPrice} (${item.discount}%OFF)` : `¥${item.unitPrice}`;
+      ctx.fillText(priceLabel, tx + 76, iy + 32);
       ctx.fillStyle = '#cc6600';
       ctx.font = 'bold 16px Courier New';
       ctx.textAlign = 'right';
