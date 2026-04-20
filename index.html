@@ -913,30 +913,28 @@ function drawGameOver() {
   ctx.textAlign = 'center';
 
   ctx.fillStyle = '#ff4444';
-  ctx.font = 'bold 42px Courier New';
-  ctx.fillText('GAME OVER', W / 2, 80);
+  ctx.font = 'bold 36px Courier New';
+  ctx.fillText('GAME OVER', W / 2, 40);
 
   ctx.fillStyle = '#ffaa66';
-  ctx.font = '16px Courier New';
-  ctx.fillText('The food has taken over the restaurant!', W / 2, 115);
+  ctx.font = '14px Courier New';
+  ctx.fillText('The food has taken over the restaurant!', W / 2, 62);
 
   ctx.fillStyle = '#ffdd44';
-  ctx.font = 'bold 24px Courier New';
-  ctx.fillText(`FINAL SCORE: ${score}`, W / 2, 150);
+  ctx.font = 'bold 20px Courier New';
+  ctx.fillText(`FINAL SCORE: ${score}`, W / 2, 88);
 
   ctx.fillStyle = '#44dd88';
-  ctx.font = 'bold 20px Courier New';
-  ctx.fillText(`RANK: ${getRank(score)}`, W / 2, 180);
+  ctx.font = 'bold 18px Courier New';
+  ctx.fillText(`RANK: ${getRank(score)}`, W / 2, 112);
 
-  // Per-dish discount explanation
   ctx.fillStyle = '#ff9966';
-  ctx.font = '14px Courier New';
-  ctx.fillText('Defeat more of each dish for a bigger discount!', W / 2, 210);
+  ctx.font = '13px Courier New';
+  ctx.fillText('Defeat more of each dish for a bigger discount!', W / 2, 134);
 
-  // Dish kill breakdown + order
   ctx.fillStyle = '#ffcc44';
-  ctx.font = 'bold 16px Courier New';
-  ctx.fillText('- TAP A DISH TO ORDER! -', W / 2, 235);
+  ctx.font = 'bold 14px Courier New';
+  ctx.fillText('- TAP A DISH TO ORDER! -', W / 2, 154);
 
   const allEntries = getGameOverEntries();
   const totalKills = allEntries.reduce((sum, e) => sum + e.count, 0);
@@ -952,12 +950,12 @@ function drawGameOver() {
   ctx.fillStyle = '#ffcc44';
   ctx.font = 'bold 11px Courier New';
   ctx.textAlign = 'left';
-  ctx.fillText('MENU', tableX + 100, startY + 19);
+  ctx.fillText('MENU', tableX + 82, startY + 19);
   ctx.textAlign = 'center';
-  ctx.fillText('KO', tableX + 290, startY + 19);
-  ctx.fillText('OFF', tableX + 350, startY + 19);
-  ctx.fillText('PRICE', tableX + 440, startY + 19);
-  ctx.fillText('QTY', tableX + 530, startY + 19);
+  ctx.fillText('KO', tableX + 270, startY + 19);
+  ctx.fillText('OFF', tableX + 330, startY + 19);
+  ctx.fillText('PRICE', tableX + 420, startY + 19);
+  ctx.fillText('QTY', tableX + 510, startY + 19);
 
   // Table rows
   for (let i = 0; i < allEntries.length; i++) {
@@ -977,9 +975,9 @@ function drawGameOver() {
     // Draw dish thumbnail
     const img = dishImages[entry.imgKey];
     const thumbX = tableX + 8;
-    const thumbY = ry + 5;
-    const thumbW = 84;
-    const thumbH = 62;
+    const thumbY = ry + 4;
+    const thumbW = 66;
+    const thumbH = 48;
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.save();
       ctx.beginPath();
@@ -1003,8 +1001,8 @@ function drawGameOver() {
     // Dish name
     ctx.textAlign = 'left';
     ctx.fillStyle = entry.isBoss ? '#ffdd44' : '#fff';
-    ctx.font = entry.isBoss ? 'bold 14px Courier New' : '14px Courier New';
-    ctx.fillText(entry.name, tableX + 100, ry + 30);
+    ctx.font = entry.isBoss ? 'bold 13px Courier New' : '13px Courier New';
+    ctx.fillText(entry.name, tableX + 82, ry + 22);
 
     // Per-dish discount
     const dishDisc = getDishDiscount(entry.count);
@@ -1014,18 +1012,18 @@ function drawGameOver() {
     // Kill count
     ctx.textAlign = 'center';
     ctx.fillStyle = entry.count > 0 ? '#44dd88' : '#666';
-    ctx.font = 'bold 15px Courier New';
-    ctx.fillText(`${entry.count}`, tableX + 290, ry + 38);
+    ctx.font = 'bold 14px Courier New';
+    ctx.fillText(`${entry.count}`, tableX + 270, ry + 30);
 
     // Discount %
     if (dishDisc > 0) {
       ctx.fillStyle = '#ff4444';
-      ctx.font = 'bold 14px Courier New';
-      ctx.fillText(`${dishDisc}%`, tableX + 350, ry + 38);
+      ctx.font = 'bold 13px Courier New';
+      ctx.fillText(`${dishDisc}%`, tableX + 330, ry + 30);
     } else {
       ctx.fillStyle = '#555';
       ctx.font = '12px Courier New';
-      ctx.fillText('--', tableX + 350, ry + 38);
+      ctx.fillText('--', tableX + 330, ry + 30);
     }
 
     // Price
@@ -1035,32 +1033,32 @@ function drawGameOver() {
       ctx.fillStyle = '#886655';
       ctx.font = '11px Courier New';
       const origText = `¥${basePrice}`;
-      ctx.fillText(origText, tableX + 440, ry + 24);
+      ctx.fillText(origText, tableX + 420, ry + 18);
       const origW = ctx.measureText(origText).width;
       ctx.strokeStyle = '#886655';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(tableX + 440 - origW / 2 - 2, ry + 21);
-      ctx.lineTo(tableX + 440 + origW / 2 + 2, ry + 21);
+      ctx.moveTo(tableX + 420 - origW / 2 - 2, ry + 15);
+      ctx.lineTo(tableX + 420 + origW / 2 + 2, ry + 15);
       ctx.stroke();
       // Discounted price
       ctx.fillStyle = '#ff4444';
-      ctx.font = 'bold 15px Courier New';
-      ctx.fillText(`¥${salePrice}`, tableX + 440, ry + 46);
+      ctx.font = 'bold 14px Courier New';
+      ctx.fillText(`¥${salePrice}`, tableX + 420, ry + 38);
     } else {
       ctx.fillStyle = '#ffaa66';
-      ctx.font = '14px Courier New';
-      ctx.fillText(`¥${basePrice}`, tableX + 440, ry + 38);
+      ctx.font = '13px Courier New';
+      ctx.fillText(`¥${basePrice}`, tableX + 420, ry + 30);
     }
 
     // Order quantity
     ctx.fillStyle = qty > 0 ? '#ffdd44' : '#666';
-    ctx.font = 'bold 15px Courier New';
-    ctx.fillText(`${qty}`, tableX + 530, ry + 38);
+    ctx.font = 'bold 14px Courier New';
+    ctx.fillText(`${qty}`, tableX + 510, ry + 30);
 
     // "+" button
     const btnX = tableX + tableW - 55;
-    const btnY = ry + 22;
+    const btnY = ry + 14;
     ctx.fillStyle = '#cc6600';
     ctx.beginPath();
     ctx.roundRect(btnX, btnY, GO_ORDER_BTN_W, GO_ORDER_BTN_H, 5);
@@ -1084,22 +1082,22 @@ function drawGameOver() {
   }
 
   // Total line
-  const totalY = startY + 30 + allEntries.length * rowH + 8;
+  const totalY = startY + 30 + allEntries.length * rowH + 4;
   ctx.fillStyle = 'rgba(204, 102, 0, 0.3)';
   ctx.fillRect(tableX, totalY, tableW, 28);
   ctx.fillStyle = '#ffcc44';
   ctx.font = 'bold 14px Courier New';
   ctx.textAlign = 'left';
-  ctx.fillText('TOTAL', tableX + 100, totalY + 19);
+  ctx.fillText('TOTAL', tableX + 82, totalY + 19);
   ctx.textAlign = 'center';
   ctx.fillStyle = '#44dd88';
   ctx.font = 'bold 15px Courier New';
-  ctx.fillText(`${totalKills}`, tableX + 290, totalY + 20);
+  ctx.fillText(`${totalKills}`, tableX + 270, totalY + 20);
 
   // Order total qty and price
   const orderTotal = Object.values(orderCart).reduce((s, v) => s + v, 0);
   ctx.fillStyle = '#ffdd44';
-  ctx.fillText(`${orderTotal}`, tableX + 530, totalY + 20);
+  ctx.fillText(`${orderTotal}`, tableX + 510, totalY + 20);
 
   // Calculate total price using per-dish discounts
   let totalPrice = 0;
@@ -1117,25 +1115,25 @@ function drawGameOver() {
       ctx.fillStyle = '#886655';
       ctx.font = '11px Courier New';
       const origTotalText = `¥${totalOriginal}`;
-      ctx.fillText(origTotalText, tableX + 440, totalY + 12);
+      ctx.fillText(origTotalText, tableX + 420, totalY + 12);
       const origTW = ctx.measureText(origTotalText).width;
       ctx.strokeStyle = '#886655';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(tableX + 440 - origTW / 2 - 2, totalY + 9);
-      ctx.lineTo(tableX + 440 + origTW / 2 + 2, totalY + 9);
+      ctx.moveTo(tableX + 420 - origTW / 2 - 2, totalY + 9);
+      ctx.lineTo(tableX + 420 + origTW / 2 + 2, totalY + 9);
       ctx.stroke();
     }
     ctx.fillStyle = '#ff4444';
     ctx.font = 'bold 14px Courier New';
-    ctx.fillText(`¥${totalPrice}`, tableX + 440, totalY + 26);
+    ctx.fillText(`¥${totalPrice}`, tableX + 420, totalY + 26);
   }
 
   // SEND TO KITCHEN button
   const sendBtnW = 280;
   const sendBtnH = 44;
   const sendBtnX = W / 2 - sendBtnW / 2;
-  const sendBtnY = totalY + 48;
+  const sendBtnY = totalY + 36;
   if (orderTotal > 0) {
     const time = Date.now() / 1000;
     const pulse = Math.sin(time * 4) * 0.15 + 0.85;
@@ -1174,7 +1172,8 @@ function handleGameOverClick(cx, cy) {
   const tableX = GO_TABLE_X;
   const tableW = GO_TABLE_W;
 
-  // Check +/- buttons for each row
+  // Check +/- buttons for each row (with touch padding for easier tapping)
+  const touchPad = 10;
   for (let i = 0; i < allEntries.length; i++) {
     const entry = allEntries[i];
     const ry = startY + 30 + i * rowH;
@@ -1183,7 +1182,7 @@ function handleGameOverClick(cx, cy) {
     const qty = orderCart[entry.name] || 0;
 
     // "+" button
-    if (cx >= btnX && cx <= btnX + GO_ORDER_BTN_W && cy >= btnY && cy <= btnY + GO_ORDER_BTN_H) {
+    if (cx >= btnX - touchPad && cx <= btnX + GO_ORDER_BTN_W + touchPad && cy >= btnY - touchPad && cy <= btnY + GO_ORDER_BTN_H + touchPad) {
       orderCart[entry.name] = (orderCart[entry.name] || 0) + 1;
       sfxOrder();
       return true;
@@ -1192,7 +1191,7 @@ function handleGameOverClick(cx, cy) {
     // "-" button
     if (qty > 0) {
       const minusBtnX = btnX - 34;
-      if (cx >= minusBtnX && cx <= minusBtnX + GO_ORDER_BTN_W && cy >= btnY && cy <= btnY + GO_ORDER_BTN_H) {
+      if (cx >= minusBtnX - touchPad && cx <= minusBtnX + GO_ORDER_BTN_W + touchPad && cy >= btnY - touchPad && cy <= btnY + GO_ORDER_BTN_H + touchPad) {
         orderCart[entry.name] = Math.max(0, (orderCart[entry.name] || 0) - 1);
         if (orderCart[entry.name] === 0) delete orderCart[entry.name];
         sfxOrder();
@@ -1229,6 +1228,12 @@ function handleGameOverClick(cx, cy) {
       gameState = 'kitchen';
       return true;
     }
+  }
+
+  // Absorb clicks inside the table area so the game doesn't restart
+  const tableBottom = startY + 30 + allEntries.length * rowH + 100;
+  if (cx >= tableX && cx <= tableX + tableW && cy >= startY - 20 && cy <= tableBottom) {
+    return true;
   }
 
   return false;
@@ -1555,8 +1560,8 @@ function canvasCoords(e) {
 // Game over screen layout constants (shared between draw and click handling)
 const GO_TABLE_W = 700;
 const GO_TABLE_X = (W - GO_TABLE_W) / 2;
-const GO_START_Y = 248;
-const GO_ROW_H = 72;
+const GO_START_Y = 166;
+const GO_ROW_H = 56;
 const GO_ORDER_BTN_X = GO_TABLE_X + GO_TABLE_W - 38;
 const GO_ORDER_BTN_W = 28;
 const GO_ORDER_BTN_H = 28;
